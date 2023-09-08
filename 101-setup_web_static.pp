@@ -1,136 +1,91 @@
-#!/usr/bin/puppet apply
-# AirBnB clone web server setup and configuration
+# Configures a web server for deployment of web_static.
 
-# Update package repositories
-exec { 'apt-get-update':
-  command => '/usr/bin/apt-get update',
-  path    => '/usr/bin:/usr/sbin:/bin',
-}
+# Nginx configuration file
+$nginx_conf = "server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    add_header X-Served-By ${hostname};
+    root   /var/www/html;
+    index  index.html index.htm;
 
-# Remove the current web_static directory
-exec { 'remove-current':
-  command => 'rm -rf /data/web_static/current',
-  path    => '/usr/bin:/usr/sbin:/bin',
-}
+    location /hbnb_static {
+        alias /data/web_static/current;
+        index index.html index.htm;
+    }
 
-# Install nginx package
+    location /redirect_me {
+        return 301 http://cuberule.com/;
+    }
+
+    error_page 404 /404.html;
+    location /404 {
+      root /var/www/html;
+      internal;
+    }
+}"
+
 package { 'nginx':
-  ensure  => installed,
-  require => Exec['apt-get-update'],
-}
+  ensure   => 'present',
+  provider => 'apt'
+} ->
 
-# Create the /var/www directory
-file { '/var/www':
-  ensure  => directory,
-  mode    => '0755',
-  recurse => true,
-  require => Package['nginx'],
-}
+file { '/data':
+  ensure  => 'directory'
+} ->
 
-# Create a simple index.html file
-file { '/var/www/html/index.html':
-  content => 'Hello, World!',
-  require => File['/var/www'],
-}
+file { '/data/web_static':
+  ensure => 'directory'
+} ->
 
-# Create a custom 404 error page
-file { '/var/www/error/404.html':
-  content => "Ceci n'est pas une page",
-  require => File['/var/www'],
-}
+file { '/data/web_static/releases':
+  ensure => 'directory'
+} ->
 
-# Create necessary directories for web_static
-exec { 'make-static-files-folder':
-  command => 'mkdir -p /data/web_static/releases/test /data/web_static/shared',
-  path    => '/usr/bin:/usr/sbin:/bin',
-  require => Package['nginx'],
-}
+file { '/data/web_static/releases/test':
+  ensure => 'directory'
+} ->
 
-# Create a custom index.html for the test release
+file { '/data/web_static/shared':
+  ensure => 'directory'
+} ->
+
 file { '/data/web_static/releases/test/index.html':
-  content => "
-<!DOCTYPE html>
-<html lang='en-US'>
-	<head>
-		<title>Home - AirBnB Clone</title>
-	</head>
-	<body>
-		<h1>Welcome to AirBnB!</h1>
-	</body>
-</html>
-",
-  replace => true,
-  require => Exec['make-static-files-folder'],
+  ensure  => 'present',
+  content => "Holberton School Puppet\n"
+} ->
+
+file { '/data/web_static/current':
+  ensure => 'link',
+  target => '/data/web_static/releases/test'
+} ->
+
+exec { 'chown -R ubuntu:ubuntu /data/':
+  path => '/usr/bin/:/usr/local/bin/:/bin/'
 }
 
-# Link the test release to current
-exec { 'link-static-files':
-  command => 'ln -sf /data/web_static/releases/test/ /data/web_static/current',
-  path    => '/usr/bin:/usr/sbin:/bin',
-  require => [
-    Exec['remove-current'],
-    File['/data/web_static/releases/test/index.html'],
-  ],
-}
+file { '/var/www':
+  ensure => 'directory'
+} ->
 
-# Change ownership of /data to ubuntu user
-exec { 'change-data-owner':
-  command => 'chown -hR ubuntu:ubuntu /data',
-  path    => '/usr/bin:/usr/sbin:/bin',
-  require => Exec['link-static-files'],
-}
+file { '/var/www/html':
+  ensure => 'directory'
+} ->
 
-# Configure Nginx default site
+file { '/var/www/html/index.html':
+  ensure  => 'present',
+  content => "Holberton School Nginx\n"
+} ->
+
+file { '/var/www/html/404.html':
+  ensure  => 'present',
+  content => "Ceci n'est pas une page\n"
+} ->
+
 file { '/etc/nginx/sites-available/default':
-  ensure  => present,
-  mode    => '0644',
-  content => "
-server {
-	listen 80 default_server;
-	listen [::]:80 default_server;
-	server_name _;
-	index index.html index.htm;
-	error_page 404 /404.html;
-	add_header X-Served-By \$hostname;
-	location / {
-		root /var/www/html/;
-		try_files \$uri \$uri/ =404;
-	}
-	location /hbnb_static/ {
-		alias /data/web_static/current/;
-		try_files \$uri \$uri/ =404;
-	}
-	if (\$request_filename ~ redirect_me){
-		rewrite ^ https://sketchfab.com/bluepeno/models permanent;
-	}
-	location = /404.html {
-		root /var/www/error/;
-		internal;
-	}
-}",
-  require => [
-    Package['nginx'],
-    File['/var/www/html/index.html'],
-    File['/var/www/error/404.html'],
-    Exec['change-data-owner'],
-  ],
-}
+  ensure  => 'present',
+  content => $nginx_conf
+} ->
 
-# Enable the default site
-exec { 'enable-site':
-  command => "ln -sf '/etc/nginx/sites-available/default' '/etc/nginx/sites-enabled/default'",
-  path    => '/usr/bin:/usr/sbin:/bin',
-  require => File['/etc/nginx/sites-available/default'],
-}
-
-# Restart the nginx service
-service { 'nginx':
-  ensure     => 'running',
-  enable     => true,
-  subscribe  => Exec['enable-site'],
-  require    => [
-    Exec['change-data-owner'],
-    Package['nginx'],
-    File['/data/web_static/releases/test/index.html'],
-  ],
+exec { 'nginx restart':
+  path => '/etc/init.d/'
 }
